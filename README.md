@@ -6,7 +6,7 @@ This code example shows the development of a coefcor for the element **aluminium
 
 As the following code is an example for the application on aluminium - for all other elements the term 'Al' can simply be replaced by the desired element (Ti, Fe etc.).
 
-The code was written using RGUI version 4.3.1, RCMDR version 2.8-0 and RStudio version 2023.06.1 with Quarto version 1.3.433. It is executable, i.e. it is fully functional when handled according to the instructions:
+The code was written using RGUI version 4.3.1, RCMDR version 2.8-0 and RStudio version 2023.06.1 with Quarto version 1.3.433. It is executable, i.e. it is fully functional.
 
 The sources used to create the code for each chapter can be found under 'source' and are only presented when the code is first introduced.
 
