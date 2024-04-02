@@ -1,0 +1,2408 @@
+---
+title: "The Munich Procedure"
+subtitle: "Calculating and applying coefficient corrections following the Munich Procedure"
+author: "Michaela Schauer"
+date: "`r Sys.Date()`" 
+
+toc: true
+toc-depth: 5
+toc-title: Contents
+number-sections: true
+callout-icon: false
+
+knitr:
+  opts_chunk: 
+    warning: false
+    message: false
+    
+editor: visual
+license: CC BY
+
+format:
+  pdf:
+    classoption: article
+    theme: cosmo
+    colorlinks: true
+    geometry: 
+    - top=20mm
+    - bottom=20mm
+    - left=20mm
+    - right=20mm
+    - heightrounded
+  html:
+    toc-location: left
+    embed-resources: true
+    code-overflow: wrap
+---
+
+\newpage
+
+## Introduction
+
+This script **presents the Munich Procedure** which is **based on the Frankfurt Procedure** developed by Dr Markus Helfert and **takes this approach a step further** ([Schauer 2023](https://doi.org/10.5282/ubm/data.405) & [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914)): The Frankfurt Procedure compares values measured by p-XRF (x-values or independent variable) with values of the same set of samples obtained by a laboratory method - in this case WD-RFA (y-values or dependent variable). A coefficient correction (coefcor) is applied by using the calculated slope and, if appropriate, intercept to correct the p-XRF values to match those of the laboratory method. In addition, the same approach can be used to compare data obtained from the same instrument before and after a change of set-up by the manufacturer. The Munich Procedure additionally provides the calculations as R-scripts and adds quality criteria such as rSEE, RMS and CI, as well as the associated graphical output.
+
+This code example shows the development of a coefcor for the element **aluminium** by **comparing p-XRF and WD-RFA values** from measurements of the **Frankfurt pottery sample set**. The p-XRF data used are from the first data set produced for the Niton XL3t No 97390 - namely **coefcor I**.
+
+As the following code is an example for the application on aluminium - for all other elements the term 'Al' can simply be replaced by the desired element (Ti, Fe etc.).
+
+## About this code
+
+The code was written using RGUI version 4.3.1, RCMDR version 2.8-0 and RStudio version 2023.06.1 with Quarto version 1.3.433. It is executable, i.e. it is fully functional when handled according to the instructions:
+
+-   In order for the code to run without errors, the 'Chunk Output line' must be checked under 'Edit the R-Markdown format options for the current file' (small cogwheel to the right of the 'Render' button).
+
+-   To set the working directory, the checkbox under 'Workspace Panes' (the four-square icon above the Render button) must be set to 'Show all panes'. Then there is a panel at the bottom right of the screen, whose display in this panel's toolbar must be set to 'Files'. There you will find a blue cogwheel (More File Commands), select this and a drop down menu will appear. Select 'set as working directory' - this will set the working directory to the folder where the project is located. This only works if the entire project folder has been saved unchanged!
+
+The sources used to create the code for each chapter can be found under 'source' and are only presented when the code is first introduced.
+
+Schauer, Michaela 2024: Coefficient corrections for portable X-ray fluorescence data of the Niton XL3t No. 97390 (coefcor I-IV) developed according to the Munich procedure. Data in Brief 53. 109914. <https://doi.org/10.1016/j.dib.2023.109914>
+
+Schauer, Michaela 2023: R-scripts and data of coefficient corrections developed since 2017 for the Niton XL3t No. 97390 following the Munich Procedure. 12. September 2023. Open Data LMU. <https://doi.org/10.5282/ubm/data.405>
+
+## Packages
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.projectpro.io/recipes/load-package-r> and <https://www.dataquest.io/blog/install-package-r/>
+:::
+
+::: {.callout-tip title="install packages" collapse="true" appearance="minimal"}
+To use this script you have to install the necessary packages by using this code
+
+```{r}
+#| eval: false
+install.packages(c('car','cowplot','dplyr','ggpmisc','ggplot2','ggpubr','grid',
+                   'tibble','Rcmdr','RcmdrMisc'))
+```
+:::
+
+The below named packages must be loaded actively at every restart (regardless of whether R-Gui or R-Studio is used to run the code).
+
+```{r}
+library(car)
+library(cowplot)
+library(dplyr)
+library(ggpmisc)
+library(ggplot2)
+library(ggpubr)
+library(grid)
+library(tibble)
+library(Rcmdr)
+library(RcmdrMisc)
+```
+
+## Set working directory
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://martinctc.github.io/blog/rstudio-projects-and-working-directories-a-beginner%27s-guide/>, <https://www.grainge.org/pages/authoring/relative_paths/relative_paths.htm> and <https://r4ds.had.co.nz/workflow-projects.html>
+:::
+
+Next, the file path - i.e. the location where the file that R is supposed to work with can be found - must be defined. In R-terminology this is call working directory. We are working with a relative path which is defined in and by the location of the R-project-file (**MunichProcedure.Rproj**).
+
+To adjust the working directory to the position of the files on your computer, click on 'Files' in the task bar of the lower right pane and select 'Munich Procedure' from the terms in the header written in blue. You should see the folder structure of this project in the field below. Now under 'More' (blue cogwheel) select 'Set As Working Directory'.
+
+```{r}
+knitr::opts_knit$set(root.dir = "./")
+```
+
+## Preparing the spreadsheet
+
+### Coefcors for p-XRF and laboratory methods {#sec-coefcorlab}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.digitalocean.com/community/tutorials/r-read-csv-file-into-data-frame>, <https://sparkbyexamples.com/r-programming/r-select-function-from-dplyr/>, <https://dplyr.tidyverse.org/reference/mutate.html>, <https://www.digitalocean.com/community/tutorials/replace-in-r>, <https://search.r-project.org/R/refmans/base/html/Round.html>, <https://www.statology.org/transpose-data-frame-in-r/>, <https://stackoverflow.com/questions/40947288/how-to-calculate-mean-of-all-columns-by-group>, <https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/merge> and <https://datatofish.com/export-dataframe-to-csv-in-r/>
+:::
+
+The source file must be prepared in the same way as the \*\*\_data.csv\*\* files(see e.g. **coefcorI_example_data.csv**). The most important requirements are the headers of the columns - p-XRF data have headers that only give the elements (Si, Ti etc.), while the header for laboratory analyses also contains information about the analysis type - for example WD-RFA (Si.WDXRF, Ti.WDRFA etc.).
+
+The file format is created from the analytical data in files named \*\*\_data.csv\*\* (in this example **coefcorI_adata.csv**). Loading is only possible if the required file is stored in a folder that can be found in the defined working directory.
+
+```{r}
+dataset<- read.csv("../data_analytical//coefcorI_adata.csv")
+```
+
+Next we filter for the information we need.
+
+```{r}
+dataset_pXRF<-select(dataset,"Sample","Si","Ti","Al","Fe","Mn","Mg","Ca","K","P",
+"S","Cl","Sc","V","Cr","Co","Ni","Cu","Zn","As","Se","Rb","Sr","Y","Zr","Nb","Mo",
+"Pd","Ag","Cd","Sn","Sb","Te","Cs","Ba","La","Ce","Hf","Ta","W","Re","Au","Hg",
+"Pb","Bi","Th","U")
+```
+
+Then we replace the information that a certain value was below the limit of detection (\<LOD) with 0 and define all measurement values as numeric characters.
+
+```{r}
+dataset_pXRF <- mutate_all(dataset_pXRF, ~gsub("<LOD", "0", .))
+
+dataset_pXRF[, 2:47] <- lapply(dataset_pXRF[, 2:47], as.numeric)
+```
+
+Following that, we calculate the mean for each sample and element, then we round those values to whole numbers.
+
+```{r}
+dataset_pXRF_mean<-summarise(dataset_pXRF, across(everything(), mean), .by = c(Sample))
+
+dataset_pXRF_mean[, 2:47] <- round(dataset_pXRF_mean[, 2:47])
+```
+
+Next, we load the file containing the WDXRF measurements of Dr. Markus Helfert (**MHelfert_FrankfurtProcedure_WDXRFdata.csv**).
+
+```{r}
+dataset_WDXRF<- read.csv("../data_analytical//MHelfert_FrankfurtProcedure_WDXRFdata.csv")
+```
+
+And combine both files by sample number.
+
+```{r}
+data<- merge(dataset_pXRF_mean, dataset_WDXRF, by = "Sample", all = FALSE)
+```
+
+Then, we export the file as \*\*\_data.csv\*\* (in our case **coefcorI_data.csv**)
+
+```{r}
+#| eval: false
+write.csv(data,"../data_analytical/coefcorI_data.csv",row.names=TRUE)
+```
+
+Now we are ready to go and can start to develop coefcor I.
+
+### Device-internal coefcors
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.digitalocean.com/community/tutorials/r-read-csv-file-into-data-frame>, <https://sparkbyexamples.com/r-programming/r-select-function-from-dplyr/>, <https://www.statology.org/r-add-suffix-to-column-names/> and <https://datatofish.com/export-dataframe-to-csv-in-r/>
+:::
+
+If the \_data.csv file is to be prepared for internal coefcors such as for example coefcor ItoII of the Niton XL3t No 97390 ([Schauer 2023](https://doi.org/10.5282/ubm/data.405) & [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914)), the files prepared in accordance with [section -@sec-coefcorlab] form the basis.
+
+The first step is to load the file whose data are to be fitted - i.e. they correspond to the independent variable (x-axis), ergo the p-XRF data from before. Then we select the required variables. In our example this dataset corresponds to coefcorI_data.csv.
+
+```{r}
+dataset_pXRF_I<- read.csv("../data_analytical//coefcorI_data.csv")
+
+dataset_pXRF_I<-select(dataset_pXRF_I,"Sample","Si","Ti","Al","Fe","Mn","Mg","Ca","K","P",
+"S","Cl","Sc","V","Cr","Co","Ni","Cu","Zn","As","Se","Rb","Sr","Y","Zr","Nb","Mo",
+"Pd","Ag","Cd","Sn","Sb","Te","Cs","Ba","La","Ce","Hf","Ta","W","Re","Au","Hg","Pb",
+"Bi","Th","U")
+```
+
+In the second step, the file containing the values to be fitted is loaded - i.e. they correspond to the dependent variable (y-axis), ergo the WDXRF values from before. Again, the desired variables are selected. In our example this dataset corresponds to coefcorII_data.csv.
+
+```{r}
+dataset_pXRF_II<- read.csv("../data_analytical//coefcorII_data.csv")
+
+dataset_pXRF_II<-select(dataset_pXRF_II,"Sample","Si","Ti","Al","Fe","Mn","Mg","Ca","K","P",
+"S","Cl","Sc","V","Cr","Co","Ni","Cu","Zn","As","Se","Rb","Sr","Y","Zr","Nb","Mo",
+"Pd","Ag","Cd","Sn","Sb","Te","Cs","Ba","La","Ce","Hf","Ta","W","Re","Au","Hg","Pb",
+"Bi","Th","U")
+```
+
+As before, an abbreviation is added to the column headings of the independent variables, namely the Roman numeral of the coefcor - in our example '.II'.
+
+```{r}
+colnames(dataset_pXRF_II)[-1] <- paste(colnames(dataset_pXRF_II)[-1], ".II", sep = "")
+```
+
+And combine both files by sample number.
+
+```{r}
+data<- merge(dataset_pXRF_II, dataset_pXRF_II, by = "Sample", all = FALSE)
+```
+
+Then, we export the file as \*\*\_data.csv\*\* (in our case **coefcorItoII_data.csv**)
+
+```{r}
+#| eval: false
+write.csv(data,"../data_analytical//coefcorItoII_data.csv",row.names=TRUE)
+```
+
+Now we are ready to go and could start to develop coefcor ItoII - yet the following example uses the data for coefcor I.
+
+## Example of developing a coefcor: Aluminium in coefcor I
+
+The following code is used to compute coefcors from a **\_data.csv**-file for the element aluminium based on the yet to load data set (see [section -@sec-Firstit]) of coefcor I (**coefcorI_data.csv**).
+
+::: {.callout-tip title="Device-interal coefcors" collapse="true" appearance="minimal"}
+If an device-internal coefcor is to be developed, only '.WDXRF' needs to be replaced by the respective Roman number of the independent variables (i.e. their suffix). Thus, in the case of coefcor ItoII, '.WDXRF' would be replaced by '.II'.
+:::
+
+### First iteration {#sec-Firstit}
+
+For the first iteration, the entire data set containing only the values of p-XRF and WDXRF-measurements is loaded (**coefcorI_data.csv**).
+
+```{r}
+dataset<- read.csv("../data_analytical//coefcorI_data.csv")
+```
+
+This data is now used to calculate linear regressions which can give us the coefcors we are looking for.
+
+#### First impressions
+
+The following information gives a first impression of the data with regard to the already existing agreement between p-XRF values and those of laboratory analysis.
+
+##### [*Scatter plot*]{.smallcaps}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <http://www.sthda.com/english/wiki/scatter-plots-r-base-graphs>
+:::
+
+The scatter plot allows an intuitive interpretation of the agreement of p-XRF- and WD-RFA-values based on the graph.
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+```
+
+In this case, the agreement does look quite okay already.
+
+##### [*Correlation*]{.smallcaps}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.statology.org/r-cor-function/>
+:::
+
+Complementing the graph, the value of the pearson correlation coefficient gives an impression of how good the agreement of the values is. The correlation coefficient can have values between 0 and 1, whereby results close to 1 are desirable.
+
+```{r}
+cor(dataset$Al,dataset$Al.WDXRF)
+```
+
+Also this figure is good - still it is likely that some iterations will be necessary to get a linear regression which complies with all the criteria defined in [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914) and shortly described below.
+
+##### [*More key values*]{.smallcaps}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.rdocumentation.org/packages/Rcmdr/versions/2.0-4/topics/numSummary>
+:::
+
+It is also worth taking a look at other key values such as mean value, standard deviation and the values of the quartiles. From this table, lower (0%) and upper limit (100%) are taken after completion of the analysis. They define the range of values for which the selected linear regression and thus the associated coefcors are valid.
+
+```{r}
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+So in this case, p-XRF values of the element aluminium which range between 43795 ppm (0% - lower limit) and 136788 ppm (100% - upper limit) could be fitted with the coefcors generated in this iteration.
+
+#### Ordinary Linear Regression (OLR)
+
+First, an ordinary linear regression - i.e. a calculation with slope and intercept - is performed. The characteristic values generated here are then compared with those of a Regression Trough Origin (RTO) calculated subsequently.
+
+##### [*Calculating the OLR*]{.smallcaps}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.statology.org/OLR-regression-in-r/> and <https://search.r-project.org/R/refmans/stats/html/lm.html>
+:::
+
+These lines of code give the most important information of the linear regression. Of particular interest are the spread of the residuals, the estimated values of intercept and slope (Al), the residual standard error (SEE) and the coefficient of determination (r²). With regard to the latter, the 'multiple R-squared' value is relevant.
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+```
+
+The residuals show a very large scatter, the necessary adjustment of the intercept is very high, but the slope correction is acceptable (the closer to 1 the better). The SEE is high, while r² is to low.
+
+##### [*Calculating the Root Mean Squared error (RMS)*]{.smallcaps} {#sec-RMS1}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://statisticsglobe.com/extract-fitted-values-from-regression-model-r> and <https://sparkbyexamples.com/r-programming/add-column-to-dataframe-in-r/>
+:::
+
+With the root mean squared error (RMS), another relevant value of the linear regression is calculated. It allows an estimation of the deviation of the p-XRF-values from their expected position (i.e. the value of the WD-XRF measurement). It is not used as a discriminating criterion here but is shown in the factors table (\_factors.csv).
+
+To calculate the RMS, first the fitted values are extracted from the linear regression model and added as new columns to the dataset (now datasetb), then the RMS is computed.
+
+```{r}
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+```
+
+##### [*Calculating the relative SEE (rSEE)*]{.smallcaps}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/sigma> and <https://www.statology.org/r-mean-of-column/>
+:::
+
+Of much higher importance to the Munich Procedure is the rSEE. To calculate this factor, first the SEE must be obtained from the previously generated data; the mean of the p-XRF-aluminium-values computed.
+
+```{r}
+SEE<-sigma(OLRAl)
+SEE
+```
+
+Then the formula to calculate the relative residual standard error is defined and the rSEE for aluminium (Al) calculated.
+
+```{r}
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+The value of the rSEE in this case is above 10% and thus higher then the threshold.
+
+##### [*Checking residuals*]{.smallcaps} {#sec-checkres1}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/plot.lm> and <https://stat.ethz.ch/R-manual/R-devel/library/stats/html/plot.lm.html>
+:::
+
+Residuals provide information on how much the measured values differ from the values estimated by linear regression. In practice, it turns out that the Q-Q plot, in which the residuals should lie on a straight line as much as possible, gives a good first impression of whether significant outliers might be present.
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(OLRAl))
+```
+
+In the Q-Q-plot, the pair of measurements in row 25 of the table (the header counts as row '0') could be an outlier. Therefore, removing this sample might significantly lower the rSEE.
+
+##### [*Checking for significant outliers*]{.smallcaps}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://rdrr.io/cran/car/src/R/outlierTest.R>
+:::
+
+To check, if significant outliers (Bonferroni p\<0.05) are present, a Bonferroni test for outlier (with studentized residuals) is performed.
+
+```{r}
+outlierTest(OLRAl)
+```
+
+This analysis confirms - as already suspected - that the sample in line 25 is a outlier. But, the p-value of the Bonferroni p shows this outlier is not significant. Due to the criteria defined in [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914), the sample does not have to be excluded, yet it might become necessary if this sample is also an outlier for the RTO.
+
+##### [*Testing for robustness - confidence intervals*]{.smallcaps} {#sec-testrob1}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/confint>, <https://www.rdocumentation.org/packages/boot/versions/1.3-28.1/topics/boot>, <https://www.rdocumentation.org/packages/boot/versions/1.3-28.1/topics/plot.boot> and <https://stopsack.github.io/risks/reference/confint.margstd_boot.html>
+:::
+
+To test the robustness of the linear regression, the values of the 0.5 and 0.95 confidence levels of the slope (Al) estimated from all p-XRF aluminium values are compared with those calculated by a bootstrap algorithm. The results of both calculations should always be as close as possible to each other. First we calculate regular CI-values.
+
+```{r}
+Confint(OLRAl, level=0.90)
+```
+
+Then we apply the bootstrap algorithm
+
+```{r}
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+According to the criteria defined in [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914), the difference in the 0.5 confidence level of the slope (Al) values are close enough to call the linear regression robust. Also the density distribution of the slope looks not too bad.
+
+Now we are done with all the necessary calculation for the OLR - let's start with the RTO.
+
+#### Regression Trough Origin (RTO)
+
+The procedure for calculating RTO and the associated parameters follows almost exactly the procedure for computing OLR. The main difference is that r² has to be calculated manually. Explanation for this can be found in [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914).
+
+##### [*Calculating the RTO*]{.smallcaps} {#sec-calRTO}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://search.r-project.org/R/refmans/stats/html/lm.html>
+:::
+
+These lines of code give the most important information of the linear regression. Of particular interest are the spread of the residuals, the estimated values of intercept and slope (Al), the residual standard error (SEE) and the coefficient of determination (r²). With regard to the latter, the 'multiple R-squared' value is relevant.
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+```
+
+The residuals - as before for the OLR - show a large scatter. Again, the slope correction is acceptable, the SEE is quite high, while r² as calculated by the formula can't be used right away (see below).
+
+##### [*Calculating the Root Mean Squared error (RMS)*]{.smallcaps} {#sec-RMS2}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://statisticsglobe.com/extract-fitted-values-from-regression-model-r> and <https://sparkbyexamples.com/r-programming/add-column-to-dataframe-in-r/>
+:::
+
+Again, in the sense of completeness, the RMS is calculated.
+
+```{r}
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+```
+
+##### [*Calculating the relative SEE (rSEE)*]{.smallcaps} {#sec-rSEE}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/sigma> and <https://www.statology.org/r-mean-of-column/>
+:::
+
+Same for the rSEE - with the difference that there is no need to calculate the mean as it was already defined when computing the rSEE or the OLR (see above)
+
+```{r}
+SEE<-sigma(RTOAl)
+SEE
+```
+
+Then the formula to calculate the relative residual standard error is defined and the rSEE for aluminium (Al) calculated.
+
+```{r}
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+Also in this case, the value of the rSEE is higher then 10% and thus above the threshold defined in [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914).
+
+##### [*Calculating the coefficient of determination (r²)*]{.smallcaps} {#sec-Alcr2}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://pubs.cif-ifc.org/doi/pdf/10.5558/tfc71326-3> and <https://onlinelibrary.wiley.com/doi/10.1111/1467-9639.00136>
+:::
+
+To calculate the corrected r² (cr2) that correctly describes the RTO, other variables have to be determined first. We already have the first one - the SEE (see above). Te next are the residual sum of squares - SSR - followed by the corrected total sum of squares - cSST. Using these three variables, cr2 can then be calculated. For the export of the graphics (\[section -#sec-exgrapic\]), every cr2 hast do be named after the element it belong to - e.g. Alcr2.
+
+```{r}
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+As for the OLR, r² is to low to be accepted.
+
+##### [*Checking residuals*]{.smallcaps} {#sec-checkres2}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/plot.lm>
+:::
+
+Again we also check the residuals.
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+As before, in the Q-Q-plot, the sample in row 25 might be an outlier. So we have to check if it is by performing a Bonferroni test.
+
+##### [*Checking for significant outliers*]{.smallcaps}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://rdrr.io/cran/car/src/R/outlierTest.R>
+:::
+
+Still, we perform the Bonferroni test.
+
+```{r}
+outlierTest(RTOAl)
+```
+
+As before, the sample in row 25 is a (non significant) outlier. According to the criteria defined in [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914) this means we will have to perform a second iteration.
+
+##### [*Testing for robustness - confidence intervals*]{.smallcaps} {#sec-testrob2}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/confint>, <https://www.rdocumentation.org/packages/boot/versions/1.3-28.1/topics/boot>, <https://www.rdocumentation.org/packages/boot/versions/1.3-28.1/topics/plot.boot> and <https://stopsack.github.io/risks/reference/confint.margstd_boot.html>
+:::
+
+Even, as we are clear how to proceed, checking the robustness of the RTO is always a good idea.
+
+```{r}
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+
+According to the criteria defined in [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914), the difference in the slope (Al) values are small enough to call the linear regression robust. Also, the density distribution of the slope looks not too bad.
+
+#### Result
+
+The first iteration showed that the same outlier (sample in row 25) is visible in OLR as well as in RTO. Moreover, rSEE and r² for the two linear regressions are not within acceptable limits. Yet, robustness is given for both. Since three of the relevant criteria are not fulfilled, we carry out a second iteration of the analysis.
+
+### Second iteration
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.digitalocean.com/community/tutorials/r-read-csv-file-into-data-frame> and <https://sparkbyexamples.com/r-programming/drop-dataframe-rows-in-r/>
+:::
+
+Since in our case we can improve the linear regression by removing the outlier - i.e. line 25 - we will do this for our second iteration.
+
+```{r}
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25), ]
+```
+
+Thus, the data set we are now working with contains all samples except for the one in line 25. I.e. now all calculations for OLR and RTO are carried out again and checked for compliance with the criteria mentioned in [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914). Based on this result, it is then decided whether a further iteration is necessary or if one of the two linear regressions can be selected and the coefcors accepted.
+
+::: {.callout-caution title="calculations" collapse="true" appearance="simple"}
+#### First impressions
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+cor(dataset$Al,dataset$Al.WDXRF)
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+#### Ordinary Linear Regression (OLR)
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+
+SEE<-sigma(OLRAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(OLRAl)
+
+Confint(OLRAl, level=0.90)
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+#### Regression Trough Origin (RTO)
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+
+SEE<-sigma(RTOAl)
+SEE
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(RTOAl)
+
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+:::
+
+#### Result
+
+Both linear regressions give the sample in row 14 as a (non-significant) outlier. In addition, r² is too low, rSEE still too high for OLR and RTO, while robustness is fine. So, having seen that, we know that we need to do a third iteration.
+
+### Third iteration
+
+With this knowledge, for the third iteration, we now remove the sample in row 14 in addition to the one in row 25.
+
+```{r}
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25,14), ]
+```
+
+::: {.callout-caution title="calculations" collapse="true" appearance="simple"}
+#### First impressions
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+cor(dataset$Al,dataset$Al.WDXRF)
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+#### Ordinary Linear Regression (OLR)
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+
+SEE<-sigma(OLRAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(OLRAl)
+
+Confint(OLRAl, level=0.90)
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+#### Regression Trough Origin (RTO)
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+
+SEE<-sigma(RTOAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(RTOAl)
+
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+:::
+
+#### Result
+
+Both linear regressions give the sample in row 27 as a (non-significant) outlier. Again, r² is too low, rSEE still too high. Robustness is fine for OLR and RTO. So on to iteration four.
+
+### Fourth iteration
+
+We additionally remove row 27 from the data set.
+
+```{r}
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25,14,27), ]
+```
+
+::: {.callout-caution title="calculations" collapse="true" appearance="simple"}
+#### First impressions
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+cor(dataset$Al,dataset$Al.WDXRF)
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+#### Ordinary Linear Regression (OLR)
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+
+SEE<-sigma(OLRAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(OLRAl)
+
+Confint(OLRAl, level=0.90)
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+#### Regression Trough Origin (RTO)
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+
+SEE<-sigma(RTOAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(RTOAl)
+
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+:::
+
+#### Result
+
+Both linear regressions give the sample in row 28 as a (non-significant) outlier. Again, r² is too low, but rSEE and robustness are fine for OLR and RTO. So on to iteration fife.
+
+### Fifth iteration
+
+For the fifth iteration we additionally exclude row 28.
+
+```{r}
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25,14,27,28), ]
+```
+
+::: {.callout-caution title="calculations" collapse="true" appearance="simple"}
+#### First impressions
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+cor(dataset$Al,dataset$Al.WDXRF)
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+#### Ordinary Linear Regression (OLR)
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+
+SEE<-sigma(OLRAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(OLRAl)
+
+Confint(OLRAl, level=0.90)
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+#### Regression Trough Origin (RTO)
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+
+SEE<-sigma(RTOAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(RTOAl)
+
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+:::
+
+#### Result
+
+In the fifth iteration, r² is still too low for OLR and RTO, but rSEE is within the required range and robustness is also given. Both linear regressions show the sample in row 24 as an outlier, which is why it is removed for the sixth iteration.
+
+### Sixth iteration
+
+Now we exclude row 24.
+
+```{r}
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25,14,27,28,24), ]
+```
+
+::: {.callout-caution title="calculations" collapse="true" appearance="simple"}
+#### First impressions
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+cor(dataset$Al,dataset$Al.WDXRF)
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+#### Ordinary Linear Regression (OLR)
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+
+SEE<-sigma(OLRAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(OLRAl)
+
+Confint(OLRAl, level=0.90)
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+#### Regression Trough Origin (RTO)
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+
+SEE<-sigma(RTOAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(RTOAl)
+
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+:::
+
+#### Result
+
+In this run we see different results: r² is past the required limits, robustness and rSEE are fine for both linear regressions. Yet, the sample in row 8 qualifies as a (non-significant) outlier for the OLR, sample 1 for RTO. A direct comparison of the characteristic values reveals the following:
+
+| criteria | OLR             | RTO             |
+|----------|-----------------|-----------------|
+| r²       | 0.873           | 0.8710          |
+| rSEE     | 8.23            | 8.11            |
+| CI 0.05  | 0.7420 - 0.7164 | 0.8716 - 0.8707 |
+| CI 0.95  | 0.9762 - 0.9920 | 0.9256 - 0.9231 |
+
+The direct comparison shows very clearly that the RTO has the better values or proportions of values in all criteria. For this reason - and because r² is still too low - the sample in row 1 is excluded for the next iteration.
+
+::: {.callout-tip title="Different values by the bootstraph?" collapse="true" appearance="minimal"}
+If you do the calculations yourself, the values of CIBS5 and CIBS95 will most likely differ slightly from those in the table. Don't worry - this is completely normal! As long as the differences between your values and those in the table are not too great (i.e. differences of more than 0.05) everything is fine.
+:::
+
+### Seventh iteration
+
+And out with row 1.
+
+```{r}
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25,14,27,28,24,1), ]
+```
+
+::: {.callout-caution title="calculations" collapse="true" appearance="simple"}
+#### First impressions
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+cor(dataset$Al,dataset$Al.WDXRF)
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+#### Ordinary Linear Regression (OLR)
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+
+SEE<-sigma(OLRAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(OLRAl)
+
+Confint(OLRAl, level=0.90)
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+#### Regression Trough Origin (RTO)
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+
+SEE<-sigma(RTOAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(RTOAl)
+
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+:::
+
+#### Result
+
+Both linear regressions give the sample in row 8 as a (non-significant) outlier. Again, r² is too low, but rSEE and robustness are fine for OLR and RTO.
+
+### Eighth iteration
+
+Lets exclude row 8, too.
+
+```{r}
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25,14,27,28,24,1,8), ]
+```
+
+::: {.callout-caution title="calculations" collapse="true" appearance="simple"}
+#### First impressions
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+cor(dataset$Al,dataset$Al.WDXRF)
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+#### Ordinary Linear Regression (OLR)
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+
+SEE<-sigma(OLRAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(OLRAl)
+
+Confint(OLRAl, level=0.90)
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+#### Regression Trough Origin (RTO)
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+
+SEE<-sigma(RTOAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(RTOAl)
+
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+:::
+
+#### Result
+
+Now we are getting somewhere: r², robustness and rSEE are fine for both linear regressions. The sample in row 30 qualifies as a (non-significant) outlier for the OLR, sample 11 for RTO. A direct comparison of the characteristic values reveals the following:
+
+| criteria | OLR             | RTO             |
+|----------|-----------------|-----------------|
+| r²       | 0.9023          | 0.9016          |
+| rSEE     | 7.31            | 7.16            |
+| CI 0.05  | 0.7675 - 0.7450 | 0.8746 - 0.8723 |
+| CI 0.95  | 0.9839 - 0.9982 | 0.9244 - 0.9238 |
+
+The direct comparison shows again that the RTO has the better values or proportions of values in all criteria except for r² which is very slightly better for the OLR. Still, the RTO is deemed better. As r² is very close to the benchmark the sample in row 11 is excluded for the next iteration to see if the values are getting better.
+
+### Ninth iteration
+
+Proceeding with excluding row 11.
+
+```{r}
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25,14,27,28,24,1,8,11), ]
+```
+
+::: {.callout-caution title="calculations" collapse="true" appearance="simple"}
+#### First impressions
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+cor(dataset$Al,dataset$Al.WDXRF)
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+#### Ordinary Linear Regression (OLR)
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+
+SEE<-sigma(OLRAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(OLRAl)
+
+Confint(OLRAl, level=0.90)
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+#### Regression Trough Origin (RTO)
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+
+SEE<-sigma(RTOAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(RTOAl)
+
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+:::
+
+#### Result
+
+In direct comparison, the values of the criteria of the RTO remain better. Also, they increased by excluding sample 11. As both linear regressions give the sample in row 18 as outlier, we are going to exclude this one, too.
+
+### Tenth iteration
+
+Now excluding row 18.
+
+```{r}
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25,14,27,28,24,1,8,11,18), ]
+```
+
+::: {.callout-caution title="calculations" collapse="true" appearance="simple"}
+#### First impressions
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+cor(dataset$Al,dataset$Al.WDXRF)
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+#### Ordinary Linear Regression (OLR)
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+
+SEE<-sigma(OLRAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(OLRAl)
+
+Confint(OLRAl, level=0.90)
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+#### Regression Trough Origin (RTO)
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+
+SEE<-sigma(RTOAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(RTOAl)
+
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+:::
+
+#### Result
+
+By excluding row 18, something interesting is happening:
+
+| criteria | OLR                               | RTO                               |
+|------------------|---------------------------|---------------------------|
+| r²       | 0.915 *0.928*                     | 0.9144 *0.9277*                   |
+| rSEE     | 7.00 *6.66*                       | 6.86 *6.50*                       |
+| CI 0.05  | 0.7796 - 0.7521 *0.7597 - 0.7987* | 0.8807 - 0.8723 *0.8877 - 0.8855* |
+| CI 0.95  | 0.9873 - 0.9982 *1.0037 - 0.9971* | 0.9244 - 0.9273 *0.9351 - 0.9348* |
+
+While the criteria of the RTO are getting better, the agreement of CILR5 and CIBS5 of the OLR are getting worse. Also, the range of values is increasing. This means, the robustness less good for this OLR. As RTO is still better, this does not affect the next step but it is worth noticing. As both linear regressions are giving the sample in line 23 as outlier, we are excluding it.
+
+### Eleventh iteration
+
+Now excluding row 23.
+
+```{r}
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25,14,27,28,24,1,8,11,18,23), ]
+```
+
+::: {.callout-caution title="calculations" collapse="true" appearance="simple"}
+#### First impressions
+
+```{r}
+scatterplot(Al.WDXRF~Al, regLine=TRUE, smooth=FALSE, boxplots=FALSE, data=dataset)
+cor(dataset$Al,dataset$Al.WDXRF)
+numSummary(dataset[,c("Al", "Al.WDXRF"), drop=FALSE], 
+           statistics=c("mean", "sd", "quantiles"),quantiles=c(0,.25,.5,.75,1))
+```
+
+#### Ordinary Linear Regression (OLR)
+
+```{r}
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+summary(OLRAl)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS
+
+SEE<-sigma(OLRAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+```
+
+```{r}
+#| eval: false
+oldparOLRAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(OLRAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(OLRAl))
+```
+
+```{r}
+outlierTest(OLRAl)
+
+Confint(OLRAl, level=0.90)
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+confint(.bs.samplesOLRAl, level=0.9, type="bca")
+plotBoot(.bs.samplesOLRAl)
+```
+
+#### Regression Trough Origin (RTO)
+
+```{r}
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+summary(RTOAl)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS
+
+SEE<-sigma(RTOAl)
+SEE
+
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+rSEE
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+Alcr2
+```
+
+```{r}
+#| eval: false
+oldparRTOAl <- par(oma=c(0,0,3,0), mfrow=c(2,2))
+plot(RTOAl)
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 2
+#| layout-ncol: 2
+print(plot(RTOAl))
+```
+
+```{r}
+outlierTest(RTOAl)
+
+Confint(RTOAl, level=0.90)
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+confint(.bs.samplesRTOAl, level=0.9, type="bca")
+plotBoot(.bs.samplesRTOAl)
+```
+:::
+
+#### Result - RTO
+
+With this step, also the robustness of the RTO starts to decrease:
+
+| criteria | OLR                               | RTO                               |
+|------------------|---------------------------|---------------------------|
+| r²       | 0.928 *0.9411*                    | 0.9277 *0.9410*                   |
+| rSEE     | 6.66 *6.22*                       | 6.50 *6.06*                       |
+| CI 0.05  | 0.7597 - 0.7987 *0.8145 - 0.7791* | 0.8877 - 0.8855 *0.8950 - 0.8932* |
+| CI 0.95  | 1.0037 - 0.9971 *1.0000 - 1.0113* | 0.9351 - 0.9348 *0.9404 - 0.9390* |
+
+Therefore, excluding row 23 is not purposeful and the RTO of iteration ten is determined as the final linear regression to extract the coefcors from.
+
+## Example of extracting criteria and factors
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://stackoverflow.com/questions/66771929/intercept-and-slope-functions-in-r>, <https://www.digitalocean.com/community/tutorials/rbind-function-r>,<https://www.statology.org/number-of-rows-in-r/>, <https://statisticsglobe.com/r-max-min-function/>, <https://www.statology.org/extract-r-squared-from-lm-in-r/>, <https://sparkbyexamples.com/r-programming/select-columns-by-index-position-in-r-2/>, <https://search.r-project.org/R/refmans/base/html/Round.html>, <https://www.statology.org/transpose-data-frame-in-r/> and <https://datatofish.com/export-dataframe-to-csv-in-r/>
+:::
+
+In order to compile all information and factors of aluminium for coefcor I in a table, the relevant criteria must first be extracted from the previous calculations. The procedure differs somewhat for OLR and RTO. For this reason, both are described below by way of example, even though only the factors of the RTO are decisive for aluminium. To get the right coefcor, we first have to re-run again some parts the calculation of iteration ten. In the normal workflow, this step is omitted because the last iteration calculated is also the one from which the coefcors are extracted.
+
+```{r}
+#| echo: false
+dataset1<- read.csv("../data_analytical//coefcorI_data.csv")
+dataset<- dataset1[-c(25,14,27,28,24,1,8,11,18), ]
+
+OLRAl<-lm(Al.WDXRF~Al, data=dataset)
+
+.bs.samplesOLRAl<- Boot(OLRAl, R=2500, method="case")
+
+RTOAl<-lm(Al.WDXRF~Al-1, data=dataset)
+
+SEE<-sigma(RTOAl)
+
+SSR<-(nrow(dataset)-1)*(SEE^2)
+cSST <-sum(((dataset$Al.WDXRF)-mean(dataset$Al.WDXRF))^2)
+Alcr2<-1-(SSR/cSST)
+
+.bs.samplesRTOAl<- Boot(RTOAl, R=2500, method="case")
+```
+
+### Extracting from OLR {#sec-finalOLR}
+
+First, the important factors slope (a) and intercept (b) are extracted.
+
+```{r}
+cf <- Confint(OLRAl, level=0.90)
+a<-cf[2]
+a<-round(a,4)
+b<-cf[1]
+b<-round(b,0)
+```
+
+Next, r², rSEE, SEE and RMS are selected. Since the last three terms are used for OLR and RTO, they must be specified here.
+
+```{r}
+r2<-summary(OLRAl)$r.squared
+r2<-round(r2,4)
+
+SEE<-sigma(OLRAl)
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+SEE<-round(SEE,0)
+rSEE<-round(rSEE,2)
+
+fitted.OLRAl <- fitted(OLRAl)
+datasetb<-cbind(dataset,fitted.OLRAl)
+RMS<-sqrt(mean((datasetb$Al-datasetb$fitted.OLRAl)^2)/nrow(datasetb))
+RMS<-round(RMS,0)
+```
+
+Then the range of values for which the coefcor applies is defined. For this, the lowest (start) and highest measured value (end) are extracted.
+
+```{r}
+start<-min(dataset$Al)
+start<-round(start,0)
+end<-max(dataset$Al)
+end<-round(end,0)
+```
+
+Additionally, the values of the confidence levels (0.05 and 0.95) of the slope calculated from the filtered, whole data set (CILR) and by the bootstrap (CIBS) are to be provided.
+
+```{r}
+CILR5<-cf[4]
+CILR5<-round(CILR5,4)
+CILR95<-cf[6]
+CILR95<-round(CILR95,4)
+
+cfb<-confint(.bs.samplesOLRAl, level=0.9, type="bca")
+CIBS5<-cfb[2]
+CIBS5<-round(CIBS5,4)
+CIBS95<-cfb[4]
+CIBS95<-round(CIBS95,4)
+```
+
+Last but not least, we extract percentage (outpct) and specification of the rows of the outliers (out). The number of samples in the data set (here 30) can be taken manually from the entire data set (first iteration - first impressions table).
+
+```{r}
+outpct<-(100/30)*(30-nrow(dataset))
+outpct<-round(outpct,2)
+out<-'25-14-27-28-24-1-8-11-18'
+```
+
+Now all variables with their respective values are merged into one table, the column header is labelled with the element name and this column is explicitly selected and defined as its own short table.In this way, all elements can be summarised together in an overview table termed **\_criteria.csv** (e.g. **coefcorI_criteria.csv**) at the end of the analysis when all coefcors for all elements are defined (see below).
+
+```{r}
+AlOLR_tab<-rbind(a,b,r2,rSEE,SEE,RMS,start,end,CILR5,CIBS5,CILR95,CIBS95,out,outpct)
+colnames(AlOLR_tab)[1] ="AlOLR"
+AlOLR_criteria<-t(AlOLR_tab)
+AlOLR_criteria
+```
+
+### Extracting from RTO {#sec-finalRTO}
+
+The compilation of the important criteria of the RTO works according to the same principle - only that now the RTO is selected to serve as input. And r² and b have to be extracted in a different way. In the case of the RTO, b is "0".
+
+```{r}
+cf <- Confint(RTOAl, level=0.90)
+a<-cf[1]
+a<-round(a,4)
+b='0'
+
+r2<-Alcr2
+r2<-round(r2,4)
+
+SEE<-sigma(RTOAl)
+mean<-mean(dataset$Al)
+rSEE<-(SEE/mean)*100
+SEE<-round(SEE,0)
+rSEE<-round(rSEE,2)
+
+fitted.RTOAl <- fitted(RTOAl)
+datasetc<-cbind(dataset,fitted.RTOAl)
+RMS<-sqrt(mean((datasetc$Al-datasetc$fitted.RTOAl)^2)/nrow(datasetc))
+RMS<-round(RMS,0)
+
+start<-min(dataset$Al)
+start<-round(start,0)
+end<-max(dataset$Al)
+end<-round(end,0)
+
+CILR5<-cf[2]
+CILR5<-round(CILR5,4)
+CILR95<-cf[3]
+CILR95<-round(CILR95,4)
+
+cfb<-confint(.bs.samplesRTOAl, level=0.9, type="bca")
+CIBS5<-cfb[1]
+CIBS5<-round(CIBS5,4)
+CIBS95<-cfb[2]
+CIBS95<-round(CIBS95,4)
+
+outpct<-(100/30)*(30-nrow(dataset))
+outpct<-round(outpct,2)
+out<-'25-14-27-28-24-1-8-11-18'
+
+Al_tab<-rbind(a,b,r2,rSEE,SEE,RMS,start,end,CILR5,CIBS5,CILR95,CIBS95,out,outpct)
+colnames(Al_tab)[1] ="Al"
+Al_criteria<-t(Al_tab)
+Al_criteria
+```
+
+::: {.callout-tip title="Export Al-criteria as table" collapse="true" appearance="minimal"}
+If desired, the aluminium criteria table can be exported as a .csv file:
+
+```{r}
+write.csv(Al_criteria,"../data_processed//coefcorI_example_criteria_Al.csv",
+          row.names=FALSE)
+```
+:::
+
+### Exporting coefcor criteria (\_criteria.csv)
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://datatofish.com/export-dataframe-to-csv-in-r/>
+:::
+
+And finally, we can combine and export the criteria of the coefcors for Al and AlOLR in a joint table (**\_criteria.csv**) which for this example is called **coefcorI_example_criteria.csv**.
+
+```{r}
+criteria<- rbind(Al_criteria,AlOLR_criteria)
+criteria
+```
+
+```{r}
+write.csv(criteria,"../data_processed//coefcorI_example_criteria.csv",row.names=TRUE)
+```
+
+And - tada! - we are done. Well, almost...
+
+### Exporting coefcor factors - slope and intercept (\_factors.csv)
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://campus.datacamp.com/courses/model-a-quantitative-trading-strategy-in-r/chapter-1-introduction-to-r-for-trading?ex=4> and <https://rdrr.io/r/base/cbind.html>
+:::
+
+In order to apply the coefcor factors of slope (a) and intercept (b) to a data set using the R-script developed for the Munich Procedure, they have to be compiled in a certain way (**\_factors.csv**). For this purpose we need to load the **\_criteria.csv-file**, in our case **coefcorI_example_criteria.csv**.
+
+```{r}
+dataset2<- read.csv("../data_processed//coefcorI_example_criteria.csv")
+```
+
+Then we can extract the necessary factors for slope and intercept from Al and Al_OLR.
+
+```{r}
+Al_a<-dataset2[1,2]
+Al_b<-dataset2[1,3]
+AlOLR_a<-dataset2[2,2]
+AlOLR_b<-dataset2[2,3]
+```
+
+We bind them together and export a table containing only the relevant coefcor factors in a spreadsheet called **\_factors.csv** - in our example **coefcorI_example_factors.csv**. An example of factors of a complete coefcor would be **coefcorI_factors.csv**
+
+```{r}
+s_i<- cbind(Al_a,Al_b,AlOLR_a,AlOLR_b)
+s_i
+```
+
+```{r}
+write.csv(s_i,"../data_processed//coefcorI_example_factors.csv",row.names=TRUE)
+```
+
+## Example of graphics export {#sec-exgrapic}
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <http://www.sthda.com/english/wiki/ggplot2-scatter-plots-quick-start-guide-r-software-and-data-visualization#basic-scatter-plots>, <http://www.sthda.com/english/wiki/ggplot2-title-main-axis-and-legend-titles>, <https://ggplot2.tidyverse.org/reference/geom_smooth.html>, <https://github.com/kassambara/ggpubr/issues/312>, <https://quarto.org/docs/computations/execution-options.html>, <https://stat.ethz.ch/R-manual/R-devel/library/graphics/html/hist.html>,<https://cran.r-project.org/web/packages/ggplotify/vignettes/ggplotify.html>, <https://www.rdocumentation.org/packages/cowplot/versions/1.1.1/topics/plot_grid>, <https://www.statology.org/plot-title-in-r/> and <https://ggplot2.tidyverse.org/reference/ggsave.html>
+:::
+
+### Exporting all relevant descriptive graphics for OLR and RTO
+
+If you wish, you can compile and export all relevant graphics of the final run. For this purpose, the graphics must first be defined as variables and then combined in a joint export of OLR (**\_OLR_allfig.eps**) and RTO (**\_RTO_allfig.eps**) of the given element - in our case Al of coefcor I (**coefcorI_example_Al_OLR_allfig.eps/coefcorI_example_Al_RTO_allfig.eps**). The figure will include:
+
+-   scatter plots of p-XRF values (Al) to WDXRF values (Al.WDXRF), showing respectively the linear regression of OLR (Al_scatter_OLR) or RTO (Al_scatter_RTO).The algorithm used here is rounding the intercept values to the nearest 100, R² to two decimal digits. The otherwise usual formula y=ax+b is given in the form y=b+ax.
+
+Attention - we have to take r² of the RTO explicitly from the previously performed calculations because it is calculated incorrectly by the algorithm [section -@sec-Alcr2].
+
+```{r}
+Al_scatter_OLR<-ggplot(dataset, aes(x=Al, y=Al.WDXRF))+geom_point()+
+  geom_smooth(method=lm,se=FALSE,formula = y ~ x)+ ggtitle("OLR")+
+  theme(plot.title = element_text(color="black", size=9,face="bold"))+ 
+  stat_poly_eq(formula = y ~ x,aes(label = paste(..eq.label.., ..rr.label.., 
+         sep = "~~~")),parse = TRUE, coef.digits = 4, f.digits = 4,rr.digits=4)
+
+Alcr2<-round(Alcr2,4)
+
+Al_scatter_RTO<-ggplot(dataset, aes(x=Al, y=Al.WDXRF))+geom_point()+
+  geom_smooth(method=lm,se=FALSE,formula = y ~ x-1)+ ggtitle("RTO")+
+  theme(plot.title = element_text(color="black", size=9,face="bold"))+ 
+  stat_poly_eq(formula = y ~ x - 1,aes(label = paste(..eq.label.., 
+                sep = "~~", "R2==", Alcr2)),parse = TRUE, coef.digits = 4)
+
+```
+
+-   scatter plots of WDXRF values (Al.WDXRF) to fitted values. The latter term refers to the recalculated p-XRF values based on the specified values for slope (RTO - scatter_Al_RTO_WDXRF_fitted) and intercept (ORL - scatter_Al_OLR_WDXRF_fitted).The values shown in the graph for the linear regression model chosen above (in our case the RTO - see [section -@sec-finalRTO]) should for slope and r² be as near to 1 as possible, intercept close to 0. The better these criteria are met, the higher the quality of the recalculation of p-XRF measurements made possible by coefcors.
+
+Here we can use the r² (Alcr2) calculated above in [section -@sec-finalRTO] and used for Al_scatter_RTO as only the scaling and origin of the data have been changed. However, the relationship between the data points and therefore r² remains the same as the linear function is still the best fit to the data.
+
+```{r}
+Al_scatter_OLR_WDXRF_fitted<-ggplot(datasetb, aes(x=fitted.OLRAl, y=Al.WDXRF))+
+  geom_point()+geom_smooth(method=lm,se=FALSE,formula = y ~ x)+ ggtitle("OLR")+
+  theme(plot.title = element_text(color="black", size=9,face="bold"))+ 
+  stat_poly_eq(formula = y ~ x,aes(label = paste(..eq.label.., ..rr.label.., 
+         sep = "~~~")),parse = TRUE, coef.digits = 4, f.digits = 4,rr.digits=4)
+
+Al_scatter_RTO_WDXRF_fitted<-ggplot(datasetc, aes(x=fitted.RTOAl, y=Al.WDXRF))+
+  geom_point()+geom_smooth(method=lm,se=FALSE,formula = y ~ x-1)+ ggtitle("RTO")+
+  theme(plot.title = element_text(color="black", size=9,face="bold"))+ 
+   stat_poly_eq(formula = y ~ x - 1,aes(label = paste(..eq.label.., 
+                sep = "~~", "R2==", Alcr2)),parse = TRUE, coef.digits = 4)
+```
+
+-   the graphs of the diagnostics of the linear regressions (now compiled as OLRAl_1_2/3_5 and RTOAl_1_2/3_5) we already know from our steps in [section -@sec-checkres1] and [section -@sec-checkres2].
+
+```{r}
+par(mar = c(0.1, 0.1, 0.1,0.1))
+
+OLRAl1<-as_grob(~plot(OLRAl,1))
+OLRAl2<-as_grob(~plot(OLRAl,2))
+OLRAl3<-as_grob(~plot(OLRAl,3))
+OLRAl5<-as_grob(~plot(OLRAl,5))
+
+OLRAl_1_2<-plot_grid(OLRAl1,OLRAl2)
+OLRAl_3_5<-plot_grid(OLRAl3,OLRAl5)
+
+RTOAl1<-as_grob(~plot(RTOAl,1))
+RTOAl2<-as_grob(~plot(RTOAl,2))
+RTOAl3<-as_grob(~plot(RTOAl,3))
+RTOAl5<-as_grob(~plot(RTOAl,5))
+
+RTOAl_1_2<-plot_grid(RTOAl1,RTOAl2)
+RTOAl_3_5<-plot_grid(RTOAl3,RTOAl5)
+```
+
+-   histograms of the distribution of the residuals for OLR (Al_hist_OLR) and RTO (Al_hist_RTO). To do this, the values of the residuals must first be extracted from the linear regression calculations. This is done in the same way as in [section -@sec-RMS1] and [section -@sec-RMS2].
+
+```{r}
+residuals.OLRAl <- residuals(OLRAl)
+datasetb<-cbind(datasetb,residuals.OLRAl)
+
+Al_hist_OLR<-as_grob(~Hist(datasetb$residuals.OLRAl, scale="frequency", 
+                           breaks="Sturges", col="darkgray",xlab="OLR residuals"))
+
+residuals.RTOAl <- residuals(RTOAl)
+datasetc<-cbind(datasetc,residuals.RTOAl)
+
+Al_hist_RTO<-as_grob(~Hist(datasetc$residuals.RTOAl, scale="frequency", 
+                           breaks="Sturges", col="darkgray",xlab="RTO residuals"))
+```
+
+-   finally, we assign the density distributions of the bootstrap known from steps [section -@sec-testrob1] and [section -@sec-testrob2] for each linear regression (Al_boot_OLR/Al_boot_RTO) to separate variables.
+
+```{r}
+Al_boot_OLR<-as_grob(~plotBoot(.bs.samplesOLRAl)+title('OLR'))
+Al_boot_RTO<-as_grob(~plotBoot(.bs.samplesRTOAl)+title('RTO'))
+```
+
+Now that all the graphics are defined we can put them together as **coefcorI_example_Al_OLR_allfig.eps**.
+
+```{r}
+coefcorI_example_Al_OLR_allfig<-plot_grid(Al_scatter_OLR,Al_scatter_OLR_WDXRF_fitted,
+                                          OLRAl_1_2,OLRAl_3_5,Al_boot_OLR,Al_hist_OLR,
+                                          ncol=2,nrow=3,rel_heights=c(1,1.5,1))
+
+ggsave("coefcorI_example_Al_OLR_allfig.eps",path=("..//graphics"),plot=last_plot(),
+       device="eps",height=25,width=30,unit=c("cm"))
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 4
+#| layout-ncol: 2
+Al_scatter_OLR
+Al_scatter_OLR_WDXRF_fitted
+OLRAl_1_2
+OLRAl_3_5
+plot_grid(Al_boot_OLR)
+plot_grid(Al_hist_OLR)
+```
+
+Same procedure for the RTO graphics named **coefcorI_example_Al_RTO_allfig.eps**.
+
+```{r}
+coefcorI_example_Al_RTO_allfig<-plot_grid(Al_scatter_RTO,Al_scatter_RTO_WDXRF_fitted,
+                                          RTOAl_1_2,RTOAl_3_5,Al_boot_RTO,Al_hist_RTO,
+                                          ncol=2,nrow=3,rel_heights=c(1,1.5,1))
+
+ggsave("coefcorI_example_Al_RTO_allfig.eps",path=("..//graphics"),plot=last_plot(),
+       device="eps",height=25,width=30,unit=c("cm"))
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 4
+#| layout-ncol: 2
+Al_scatter_RTO
+Al_scatter_RTO_WDXRF_fitted
+RTOAl_1_2
+RTOAl_3_5
+plot_grid(Al_boot_RTO)
+plot_grid(Al_hist_RTO)
+```
+
+\newpage
+
+### Exporting the traditionally presented scatter plots
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.digitalocean.com/community/tutorials/r-read-csv-file-into-data-frame>, <https://ggplot2.tidyverse.org/reference/ggsave.html>,<http://www.sthda.com/english/wiki/ggplot2-scatter-plots-quick-start-guide-r-software-and-data-visualization#basic-scatter-plots>, <https://www.rdocumentation.org/packages/cowplot/versions/1.1.1/topics/plot_grid>, <https://www.statology.org/plot-title-in-r/>, <https://datatofish.com/export-dataframe-to-csv-in-r/>
+:::
+
+In addition to the named graphics which show the criteria of the selected linear regression of a particular element, you can of course create other graphs. Here we create the combined display of scatter plots, functions and r² values of different chemical elements that are traditionally used to present coefcors or calibrations.
+
+In order to create such an example, a diagram for p-XRF values and WDXRF values of silicium (without any calculations to find the best linear regression but displaying a RTO of this data) is created using the data set **coefcorI_data.csv** and displayed together with the final scatter plot we defined above for aluminium. This graphics export is called **\_traditional_scatterplots.eps** (in our example therefore **coefcorI_example_traditional_scatterplots.eps**)
+
+```{r}
+dataset<- read.csv("../data_analytical//coefcorI_data.csv")
+
+RTOSi<-lm(Si.WDXRF~Si-1, data=dataset)
+SEE_Si<-sigma(RTOSi)
+SSR_Si<-(nrow(dataset)-1)*(SEE_Si^2)
+cSST_Si <-sum(((dataset$Si.WDXRF)-mean(dataset$Si.WDXRF))^2)
+Sicr2<-1-(SSR_Si/cSST_Si)
+Sicr2<-round(Sicr2,2)
+
+Si_scatter_RTO<-ggplot(dataset, aes(x=Si, y=Si.WDXRF))+geom_point()+
+  geom_point()+geom_smooth(method=lm,se=FALSE,formula = y ~ x-1)+ ggtitle("RTO")+
+  theme(plot.title = element_text(color="black", size=9,face="bold"))+ 
+  stat_poly_eq(formula = y ~ x - 1,aes(label = paste(..eq.label.., 
+                sep = "~~", "R2==", Sicr2)),parse = TRUE, coef.digits = 4)
+
+coefcorI_example_traditional_scatterplots<-plot_grid(Si_scatter_RTO,
+      Al_scatter_RTO,ncol=2,nrow=1)
+
+ggsave("coefcorI_example_traditional_scatterplots.eps",path=("..//graphics"),
+       plot=last_plot(),device="eps",height=8,width=15.3,unit=c("cm"))
+```
+
+```{r}
+#| echo: false
+#| layout-nrow: 1
+#| layout-ncol: 1
+Si_scatter_RTO
+Al_scatter_RTO
+```
+
+\newpage
+
+## Example of applying coefcors obtained from p-XRF and laboratory values to a dataset
+
+The **\_factor.csv** of a coefcor is only valid in the respective time period and is therefore used to apply the coefcors to a p-XRF data set produced during that time. In this example we use **coefcorI_factors.csv** which is valid for data of the Niton XL3t No 97390 collected between July 2017 and August 2018 ([Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914)).
+
+### Loading and formating the data
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.digitalocean.com/community/tutorials/r-read-csv-file-into-data-frame> and <https://sparkbyexamples.com/r-programming/r-select-function-from-dplyr/>
+:::
+
+In the following, the application of the correction factors (\_factors.csv) - in this case from coefcor I (**coefcorI_factors.csv**) - to a data set generated by p-XRF (e.g. measurements on ancient pottery) is demonstrated. coefcorI_data.csv is used as an example data set. First we load both files:
+
+```{r}
+coefcor<- read.csv("../data_processed//coefcorI_factors.csv")
+dataset<- read.csv("../data_analytical//coefcorI_data.csv")
+```
+
+Then we create a new dataset containing only the columns with p-XRF values and the sample names because we only want to recalculate those. We also define 'sample' as a variable to be able to add it to the recalculated data.
+
+```{r}
+dataset<-select(dataset,"Sample","Si","Ti","Al","Fe","Mn","Mg","Ca","K","P","S",
+                "Cl","Sc","V","Cr","Co","Ni","Cu","Zn","As","Se","Rb","Sr","Y",
+                "Zr","Nb","Mo","Pd","Ag","Cd","Sn","Sb","Te","Cs","Ba","La","Ce",
+                "Hf","Ta","W","Re","Au","Hg","Pb","Bi","Th","U")
+
+Sample<-dataset$Sample
+```
+
+### Performing the calculations
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://cran.r-project.org/web/packages/dplyr/vignettes/rowwise.htmlr> and <https://dplyr.tidyverse.org/reference/mutate.html>
+:::
+
+From this data, the necessary variables are extracted: new values to be calculated for the respective element (e.g. Si) as well as the slope \_a (e.g. Si_a) and intercept \_b (e.g. Si_b) to be applied.
+
+```{r}
+Si<-dataset$Si
+Si_a<-coefcor$Si_a
+Si_b<-coefcor$Si_b
+```
+
+The recalculation is performed using these variables. It is then necessary to decide whether the values should be given in ppm (e.g. Si_ppm), weight percent (e.g. Sipct) or, in the case of the major elements Si, Ti, Al, Fe, Mn, Mg, Ca, K and P, in oxidation percentage (e.g. SiO2).
+
+```{r}
+Sippm<-Si_a*Si+Si_b
+Sippm
+
+Sipct<-(Si_a*Si+Si_b)*0.0001
+Sipct
+
+SiO2<-(Si_a*Si+Si_b)*0.00021393
+SiO2
+```
+
+According to the Munich Procedure, the major elements are given in oxidation percentage.
+
+```{r}
+Ti<-dataset$Ti
+Ti_a<-coefcor$Ti_a
+Ti_b<-coefcor$Ti_b
+TiO2<-(Ti_a*Ti+Ti_b)*0.0001668
+
+Al<-dataset$Al
+Al_a<-coefcor$Al_a
+Al_b<-coefcor$Al_b
+Al2O3<-(Al_a*Al+Al_b)*0.00018895
+
+Fe<-dataset$Fe
+Fe_a<-coefcor$Fe_a
+Fe_b<-coefcor$Fe_b
+Fe2O3<-(Fe_a*Fe+Fe_b)*0.000143
+
+Mn<-dataset$Mn
+Mn_a<-coefcor$Mn_a
+Mn_b<-coefcor$Mn_b
+MnO<-(Mn_a*Mn+Mn_b)*0.00012912
+
+Mg<-dataset$Mg
+Mg_a<-coefcor$Mg_a
+Mg_b<-coefcor$Mg_b
+MgO<-(Mg_a*Mg+Mg_b)*0.00016583
+
+Ca<-dataset$Ca
+Ca_a<-coefcor$Ca_a
+Ca_b<-coefcor$Ca_b
+CaO<-(Ca_a*Ca+Ca_b)*0.00013992
+
+K<-dataset$K
+K_a<-coefcor$K_a
+K_b<-coefcor$K_b
+K2O<-(K_a*K+K_b)*0.00012046
+
+P<-dataset$P
+P_a<-coefcor$P_a
+P_b<-coefcor$P_b
+P2O5<-(P_a*P+P_b)*0.00022914
+```
+
+For sample-based normalisation, the created variables are combined into a new data set (data_norm) and supplemented with the sum of the main elements (sum) calculated line by line (data_norm_withsum). This new column is used to compute the percentage deviation from 100% of the major elements per row i.e. sample (sumpct).
+
+```{r}
+data_norm<-data.frame(SiO2,TiO2,Al2O3,Fe2O3,MnO,MgO,CaO,K2O,P2O5)
+
+data_norm_withsum<-data_norm %>% rowwise() %>%  mutate(sum = sum(c(SiO2,TiO2,Al2O3,
+                                                      Fe2O3,MnO,MgO,CaO,K2O,P2O5)))
+
+sumpct<-100/data_norm_withsum$sum
+```
+
+The factor sumpct will now be used for the recalculation of the main elements.
+
+```{r}
+SiO2<-SiO2*sumpct
+TiO2<-TiO2*sumpct
+Al2O3<-Al2O3*sumpct
+Fe2O3<-Fe2O3*sumpct
+MnO<-MnO*sumpct
+MgO<-MgO*sumpct
+CaO<-CaO*sumpct
+K2O<-K2O*sumpct
+P2O5<-P2O5*sumpct
+```
+
+Once the main elements have been recalculated, the cofcor factors (here coefcor I) are applied to the trace elements. These are given in ppm. As examples, the calculations for rubidium and strontium are shown.
+
+```{r}
+Rb<-dataset$Rb
+Rb_a<-coefcor$Rb_a
+Rb_b<-coefcor$Rb_b
+Rb<-Rb_a*Rb+Rb_b
+
+Sr<-dataset$Sr
+Sr_a<-coefcor$Sr_a
+Sr_b<-coefcor$Sr_b
+Sr<-Sr_a*Sr+Sr_b
+```
+
+### Compiling and exporting the processed data (\_cor_data.csv)
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://search.r-project.org/R/refmans/base/html/Round.html>, <https://www.statology.org/transpose-data-frame-in-r/> and <https://datatofish.com/export-dataframe-to-csv-in-r/>
+:::
+
+Finally, all the newly calculated variables are combined with the sample number in a new table called **\_cor_data.csv** (in our case **coefcorI_exsample_cor_data.csv**). Major element values are rounded to one decimal place, trace element values to whole digits. This table is then exported. It contains quantitative, processed data and forms the basis for further analysis.
+
+```{r}
+coefcorI_exsample_cor_data<-data.frame(Sample,SiO2,TiO2,Al2O3,Fe2O3,MnO,MgO,CaO,K2O,
+                                       P2O5,Rb,Sr)
+
+coefcorI_exsample_cor_data[, c("SiO2","TiO2","Al2O3","Fe2O3","MnO","MgO","CaO",
+"K2O","P2O5")] <- round(coefcorI_exsample_cor_data[, c("SiO2","TiO2","Al2O3",
+                                  "Fe2O3","MnO","MgO","CaO","K2O","P2O5")], 1)
+
+coefcorI_exsample_cor_data[, c("Rb","Sr")] <- round(coefcorI_exsample_cor_data[, c("Rb","Sr")], 0)
+
+coefcorI_exsample_cor_data
+
+write.csv(coefcorI_exsample_cor_data,
+          "../data_processed//coefcorI_example_cor_data.csv",row.names=TRUE)
+```
+
+## Example of applying device-internal coefcors to a dataset
+
+The **\_factor.csv** needed to correct values from the time period in which they were taken (for example from coefcor I) to fit the data of different time period (for example coefcor II; see [Schauer 2023](https://doi.org/10.5282/ubm/data.405) & [Schauer 2024](https://doi.org/10.1016/j.dib.2023.109914)) has to be chosen. In this example we use **coefcorItoII_factors.csv**.
+
+### Loading and formating the data
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://www.digitalocean.com/community/tutorials/r-read-csv-file-into-data-frame> and <https://sparkbyexamples.com/r-programming/r-select-function-from-dplyr/>
+:::
+
+In the following, the application of the correction factors (\_factors.csv) - in this case from coefcor ItoII (**coefcorItoII_factors.csv**) - to a data set generated by p-XRF (e.g. measurements on ancient pottery) is demonstrated. As before, we load both files and create the new dataset and variable.
+
+```{r}
+coefcor<- read.csv("../data_processed//coefcorItoII_factors.csv")
+dataset<- read.csv("../data_analytical//coefcorI_data.csv")
+
+dataset<-select(dataset,"Sample","Si","Ti","Al","Fe","Mn","Mg","Ca","K","P","S",
+                "Cl","Sc","V","Cr","Co","Ni","Cu","Zn","As","Se","Rb","Sr","Y",
+                "Zr","Nb","Mo","Pd","Ag","Cd","Sn","Sb","Te","Cs","Ba","La","Ce",
+                "Hf","Ta","W","Re","Au","Hg","Pb","Bi","Th","U")
+
+Sample<-dataset$Sample
+```
+
+### Performing the calculations
+
+As this calculation is performed to fit the data before applying the coefcor used in the period to which the data are correct (in our case this would be coefcor II), no calculation of oxidation percentage or normalisation needs to be performed. For all elements the corrections are applied and expressed in ppm.
+
+```{r}
+Si<-dataset$Si
+Si_a<-coefcor$Si_a
+Si_b<-coefcor$Si_b
+Si<-Si_a*Si+Si_b
+
+Ti<-dataset$Ti
+Ti_a<-coefcor$Ti_a
+Ti_b<-coefcor$Ti_b
+Ti<-Ti_a*Ti+Ti_b
+
+Al<-dataset$Al
+Al_a<-coefcor$Al_a
+Al_b<-coefcor$Al_b
+Al<-Al_a*Al+Al_b
+
+Fe<-dataset$Fe
+Fe_a<-coefcor$Fe_a
+Fe_b<-coefcor$Fe_b
+Fe<-Fe_a*Fe+Fe_b
+
+Mn<-dataset$Mn
+Mn_a<-coefcor$Mn_a
+Mn_b<-coefcor$Mn_b
+Mn<-Mn_a*Mn+Mn_b
+
+Mg<-dataset$Mg
+Mg_a<-coefcor$Mg_a
+Mg_b<-coefcor$Mg_b
+M<-Mg_a*Mg+Mg_b
+
+Ca<-dataset$Ca
+Ca_a<-coefcor$Ca_a
+Ca_b<-coefcor$Ca_b
+C<-Ca_a*Ca+Ca_b
+
+K<-dataset$K
+K_a<-coefcor$K_a
+K_b<-coefcor$K_b
+K<-K_a*K+K_b
+
+P<-dataset$P
+P_a<-coefcor$P_a
+P_b<-coefcor$P_b
+P<-P_a*P+P_b
+
+Cl<-dataset$Cl
+Cl_a<-coefcor$Cl_a
+Cl_b<-coefcor$Cl_b
+Cl<-Cl_a*Cl+Cl_b
+
+V<-dataset$V
+V_a<-coefcor$V_a
+V_b<-coefcor$V_b
+V<-V_a*V+V_b
+
+Cr<-dataset$Cr
+Cr_a<-coefcor$Cr_a
+Cr_b<-coefcor$Cr_b
+Cr<-Cr_a*Cr+Cr_b
+
+Ni<-dataset$Ni
+Ni_a<-coefcor$Ni_a
+Ni_b<-coefcor$Ni_b
+Ni<-Ni_a*Ni+Ni_b
+
+Zn<-dataset$Zn
+Zn_a<-coefcor$Zn_a
+Zn_b<-coefcor$Zn_b
+Zn<-Zn_a*Zn+Zn_b
+
+As<-dataset$As
+As_a<-coefcor$As_a
+As_b<-coefcor$As_b
+As<-As_a*As+As_b
+
+Rb<-dataset$Rb
+Rb_a<-coefcor$Rb_a
+Rb_b<-coefcor$Rb_b
+Rb<-Rb_a*Rb+Rb_b
+
+Sr<-dataset$Sr
+Sr_a<-coefcor$Sr_a
+Sr_b<-coefcor$Sr_b
+Sr<-Sr_a*Sr+Sr_b
+
+Y<-dataset$Y
+Y_a<-coefcor$Y_a
+Y_b<-coefcor$Y_b
+Y<-Y_a*Y+Y_b
+
+Zr<-dataset$Zr
+Zr_a<-coefcor$Zr_a
+Zr_b<-coefcor$Zr_b
+Zr<-Zr_a*Zr+Zr_b
+
+Nb<-dataset$Nb
+Nb_a<-coefcor$Nb_a
+Nb_b<-coefcor$Nb_b
+Nb<-Nb_a*Nb+Nb_b
+
+Ba<-dataset$Ba
+Ba_a<-coefcor$Ba_a
+Ba_b<-coefcor$Ba_b
+Ba<-Ba_a*Ba+Ba_b
+
+Pb<-dataset$Pb
+Pb_a<-coefcor$Pb_a
+Pb_b<-coefcor$Pb_b
+Pb<-Pb_a*Pb+Pb_b
+```
+
+### Compiling and exporting the processed data (\_cor_data.csv)
+
+::: {.callout-note title="source" collapse="true" appearance="minimal"}
+Instructions following <https://search.r-project.org/R/refmans/base/html/Round.html>, <https://www.statology.org/transpose-data-frame-in-r/> and <https://datatofish.com/export-dataframe-to-csv-in-r/>
+:::
+
+As before, all newly calculated variables are combined with the sample number in a new table called **\_cor_data.csv** (in our case **coefcorItoII_example_cor_data.csv**). All element values are rounded to whole digits. This table is then exported. It contains quantitative, processed data and forms the basis for applying the coefcor of the given time period (here coefcor II).
+
+```{r}
+coefcorItoII_cor_data<-data.frame(Sample,Si,Ti,Al,Fe,Mn,Mg,Ca,
+                                K,P,Cl,V,Cr,Ni,Zn,As,Rb,Sr,Y,Zr,Nb,Ba,Pb)
+
+coefcorItoII_cor_data[, c("Si","Ti","Al","Fe","Mn","Mg","Ca","K","P","Cl","V",
+                            "Cr","Ni","Zn","As","Rb","Sr","Y","Zr","Nb",
+            "Ba","Pb")] <- round(coefcorItoII_cor_data[, c("Si","Ti","Al","Fe",
+            "Mn","Mg","Ca","K","P","Cl","V","Cr","Ni","Zn","As","Rb","Sr",
+            "Y","Zr","Nb","Ba","Pb")], 0)
+
+write.csv(coefcorItoII_cor_data,
+          "../data_processed//coefcorItoII_example_cor_data.csv",row.names=TRUE)
+```
