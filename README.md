@@ -6,7 +6,7 @@ The Script **MunichProcedure.qmd** provides an example for the application of th
 
 Since the data has been structured in the form of an **R project**, the entire MunichProcedure folder can be **downloaded and run locally**.
 
-The code was written using RGUI version 4.3.1, RCMDR version 2.8-0 and RStudio version 2023.06.1 with Quarto version 1.3.433. It is executable, i.e. it is fully functional.
+The code was written using RGUI version 4.3.1, RCMDR version 2.8-0 and RStudio version 2023.06.1 with Quarto version 1.3.433. It is executable, i.e. it is fully functional. As .qmd-files use other ways to mark text and r-code then .r or .rmd-files, the folder Munich Procedure also includes a **.html and .pdf-file of the original code**.
 
 The sources used to create the code for each chapter can be found under 'source' and are only presented when the code is first introduced.
 
