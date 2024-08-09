@@ -16,6 +16,10 @@ The sources used to create the code for each chapter can be found under 'source'
 
 [Schauer, Michaela 2023](https://doi.org/10.5282/ubm/data.405): R-scripts and data of coefficient corrections developed since 2017 for the Niton XL3t No. 97390 following the Munich Procedure. 12. September 2023. Open Data LMU. 
 
+### Citation
+
+Please cite as: Schauer, M. (2024). Munich Procedure v1.0. Zenodo. https://doi.org/10.5281/zenodo.13285344
+
 ## Additional guidance
 
 In order to be able to work with the R script provided, the most important practical steps required to get started are briefly explained below. However, this is no substitute for studying the programme itself and the contents of the scripts. [Siegmund 2020](https://www.frank-siegmund.de/veroeffentlichungen/i-monographien/lehrbucharchaeostatistik) is recommended as a basis in German, as an introduction to the R plugin Quarto [his guide](https://www.frank-siegmund.de/images/opendata/EinfuehrungQuarto.zip) from 2023. In English, the [RQuarto website](https://quarto.org/) is most useful. [Field et al. 2013](https://archive.org/details/discoveringstatisticsusingr/page/n9/mode/2up) is also worth reading, entertaining and contains all the relevant information for getting started. The operators of R provide a regularly updated introduction; the current version can be found [here](https://cran.r-project.org/doc/manuals/r-release/R-intro.pdf).  
