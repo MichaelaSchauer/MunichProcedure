@@ -18,7 +18,7 @@ The sources used to create the code for each chapter can be found under 'source'
 
 ### Citation
 
-Please cite as: Schauer, M. (2024). Munich Procedure v1.0. Zenodo. https://doi.org/10.5281/zenodo.13285344
+Please cite as: Schauer, M. (2024). Munich Procedure v1.0. https://github.com/MichaelaSchauer/MunichProcedure. DOI: https://doi.org/10.5281/zenodo.13285344
 
 ## Additional guidance
 
